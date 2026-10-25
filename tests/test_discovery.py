@@ -43,12 +43,13 @@ def test_sitemap_and_anchor(tmp_path, monkeypatch):
 
 def test_overflow_boxes():
     boxes = [
-        {"selector": "#wide", "left": 0, "right": 1200},
-        {"selector": "#okay", "left": 0, "right": 390},
-        {"selector": "#hidden", "left": 0, "right": 900, "visible": False},
+        {"selector": "#wide", "left": 0, "right": 1200, "height": 20},
+        {"selector": "#okay", "left": 0, "right": 390, "height": 20},
+        {"selector": "#hidden", "left": 0, "right": 900, "height": 20, "visibility": "hidden"},
     ]
-    assert [item["kind"] for item in overflow_findings(boxes, 390)] == ["overflow"]
-    assert overflow_findings(boxes, 1440) == []
+    layout = {"scrollWidth": 1200, "clientWidth": 390, "boxes": boxes}
+    assert overflow_findings(layout, 390)[0]["count"] == 1
+    assert overflow_findings({**layout, "clientWidth": 1440}, 1440) == []
 
 
 def test_layout_script_does_not_filter_with_browser_width():

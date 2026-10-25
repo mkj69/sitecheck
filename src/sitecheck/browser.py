@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,8 @@ import subprocess
 import tempfile
 import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from PIL import Image
 
 from .checks import LAYOUT_JS
 
@@ -161,24 +164,34 @@ class Chrome:
             self.evaluate(f"document.documentElement.setAttribute({json.dumps(theme_attribute)}, {json.dumps(theme)})")
         self.pump(0.3)
 
-    def layout_boxes(self) -> list[dict]:
-        return self.evaluate(LAYOUT_JS) or []
+    def layout_boxes(self) -> dict:
+        return self.evaluate(LAYOUT_JS)
 
-    def screenshot(self, output: Path, width: int):
+    def screenshot(self, output: Path, width: int, max_height: int = 40000) -> dict:
+        if max_height < 1:
+            raise ValueError("Maximum screenshot height must be positive")
         height = int(self.evaluate("Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)"))
-        if height < 1 or height > 16000:
-            raise BrowserError(f"Page height {height}px is outside the supported 1 to 16000px range")
-        self.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": height,
+        if height < 1:
+            raise BrowserError(f"Page height {height}px is below 1px")
+        self.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": min(height, 8000),
                   "deviceScaleFactor": 1, "mobile": width < 600})
         self.pump(0.2)
         height = int(self.evaluate("Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)"))
-        if height > 16000:
-            raise BrowserError(f"Page height {height}px exceeds the 16000px screenshot limit")
-        result = self.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True,
-                           "clip": {"x": 0, "y": 0, "width": width, "height": height, "scale": 1}})
+        if height < 1:
+            raise BrowserError(f"Page height {height}px is below 1px")
+        captured_height = min(height, max_height)
+        image = Image.new("RGB", (width, captured_height))
+        for y in range(0, captured_height, 8000):
+            tile_height = min(8000, captured_height - y)
+            result = self.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True,
+                               "clip": {"x": 0, "y": y, "width": width, "height": tile_height, "scale": 1}})
+            with Image.open(BytesIO(base64.b64decode(result["data"]))) as tile:
+                if tile.size != (width, tile_height):
+                    raise BrowserError(f"Screenshot tile at {y}px has size {tile.size}, expected {(width, tile_height)}")
+                image.paste(tile.convert("RGB"), (0, y))
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(base64.b64decode(result["data"]))
-        return height
+        image.save(output, format="PNG")
+        return {"height": captured_height, "full_height": height, "truncated": height > max_height}
 
     def event_findings(self) -> list[dict]:
         findings = []

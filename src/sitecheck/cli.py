@@ -33,6 +33,7 @@ exclude = []
 sitemap = true
 chrome = ""
 browser_timeout = 40
+max_height = 40000
 # Choose media, attribute, or query.
 theme_mode = "media"
 theme_attribute = "data-theme"
@@ -64,6 +65,7 @@ def parser() -> argparse.ArgumentParser:
         part.add_argument("--no-sitemap", action="store_true")
         part.add_argument("--chrome")
         part.add_argument("--timeout", type=float, help="browser command timeout in seconds")
+        part.add_argument("--max-height", type=int, help="maximum screenshot height in pixels")
         part.add_argument("--viewports", help="comma separated widths")
         part.add_argument("--themes", help="comma separated themes")
         part.add_argument("--theme-mode", choices=("media", "attribute", "query"))
@@ -151,6 +153,9 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("Themes must be light or dark")
         theme_mode = value(args, config, "theme_mode", "media")
         browser_timeout = args.timeout if args.timeout is not None else config.get("browser_timeout", DEFAULT_BROWSER_TIMEOUT)
+        max_height = value(args, config, "max_height", 40000)
+        if max_height < 1:
+            raise ValueError("Maximum screenshot height must be positive")
         include = value(args, config, "include", [])
         exclude = value(args, config, "exclude", [])
         limit = value(args, config, "limit", 100)
@@ -198,9 +203,13 @@ def main(argv: list[str] | None = None) -> int:
                                                          for item in browser.event_findings()]
                                         if args.command in ("shots", "all"):
                                             path = output / "shots" / screenshot_name(page, theme, int(width))
-                                            browser.screenshot(path, int(width))
-                                            shots.append({"page": page, "theme": theme, "width": width,
-                                                          "path": path.relative_to(output).as_posix()})
+                                            capture = browser.screenshot(path, int(width), max_height=max_height)
+                                            shot = {"page": page, "theme": theme, "width": width,
+                                                    "path": path.relative_to(output).as_posix()}
+                                            if capture["truncated"]:
+                                                shot["note"] = (f"Screenshot truncated at {capture['height']}px; "
+                                                                f"full page height is {capture['full_height']}px")
+                                            shots.append(shot)
                                     except BrowserError as exc:
                                         findings.append({"kind": "browser_error", "page": page,
                                                          "viewport": width, "message": str(exc)})

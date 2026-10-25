@@ -84,23 +84,27 @@ def test_all_reports_overflow_and_captures_every_viewport(tmp_path, monkeypatch)
 
         def open(self, page, width, *_args):
             self.page = page
+            self.width = width
 
         def layout_boxes(self):
             if self.page.endswith("/"):
-                return [{"selector": "#wide-panel", "left": 0, "right": 1200, "visible": True}]
-            return []
+                return {"scrollWidth": max(1200, self.width), "clientWidth": self.width,
+                        "boxes": [{"selector": "#wide-panel", "left": 0, "right": 1200,
+                                   "width": 1200, "height": 20}]}
+            return {"scrollWidth": self.width, "clientWidth": self.width, "boxes": []}
 
         def event_findings(self):
             return []
 
-        def screenshot(self, output, _width):
+        def screenshot(self, output, _width, max_height):
+            assert max_height == 12345
             output.parent.mkdir(parents=True, exist_ok=True)
             Image.new("RGB", (1, 1)).save(output)
-            return 1
+            return {"height": max_height, "full_height": 19000, "truncated": True}
 
     monkeypatch.setattr(cli, "Chrome", FakeChrome)
     output = tmp_path / "out"
-    assert cli.main(["all", str(site), "--output", str(output)]) == 1
+    assert cli.main(["all", str(site), "--output", str(output), "--max-height", "12345"]) == 1
     report = json.loads((output / "report.json").read_text())
     assert any(item["kind"] == "overflow" and "#wide-panel" in item["message"]
                and item["viewport"] == 390 for item in report["findings"])
@@ -108,3 +112,7 @@ def test_all_reports_overflow_and_captures_every_viewport(tmp_path, monkeypatch)
                for item in report["findings"])
     assert not any(item["kind"] == "browser_error" for item in report["findings"])
     assert len(report["screenshots"]) == len(list((output / "shots").glob("*.png"))) == 12
+    assert all("Screenshot truncated at 12345px" in shot["note"] for shot in report["screenshots"])
+    assert "Screenshot truncated at 12345px" in (output / "report.html").read_text()
+    assert "Screenshot truncated at 12345px" in (output / "report.md").read_text()
+    assert "overflow: 1" in (output / "report.md").read_text()

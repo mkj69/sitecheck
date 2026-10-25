@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from html import escape
 import json
 from pathlib import Path
@@ -44,11 +45,18 @@ def write_reports(output: Path, findings: list[dict], shots: list[dict] | None =
     rules = rules or []
     marked = [{**item, "allowed": allowed(item, rules)} for item in findings]
     failures = [item for item in marked if not item["allowed"]]
+    counts = dict(sorted(Counter(item["kind"] for item in failures).items()))
+    kind_summary = " (" + ", ".join(f"{kind}: {count}" for kind, count in counts.items()) + ")" if counts else ""
+    summary = f"{len(failures)} errors{kind_summary}"
     report = {"findings": marked, "screenshots": shots or [], "commands": commands or [],
-              "error_count": len(failures)}
+              "error_count": len(failures), "error_counts_by_kind": counts}
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    lines = ["# Sitecheck report", "", f"Errors: {report['error_count']}", "", "## Findings", ""]
+    lines = ["# Sitecheck report", "", f"Errors: {len(failures)}{kind_summary}", "", "## Findings", ""]
     lines += [f"- {'Allowed' if item['allowed'] else 'Error'}: {item.get('page', '')} {item['kind']}: {item['message']}" for item in marked]
+    if shots:
+        lines += ["", "## Screenshots", ""]
+        lines += [f"- {shot['page']} at {shot['width']}px, {shot['theme']}: {shot['path']}"
+                  + (f" ({shot['note']})" if shot.get("note") else "") for shot in shots]
     if commands:
         lines += ["", "## Documentation commands", ""]
         lines += [f"- {item['file']}:{item['line']}: {'passed' if item['returncode'] == 0 else 'failed'} {item['output_tail']}" for item in commands]
@@ -56,10 +64,11 @@ def write_reports(output: Path, findings: list[dict], shots: list[dict] | None =
     cards = []
     for shot in shots or []:
         path = escape(shot["path"], quote=True)
-        cards.append(f'<figure><a href="{path}"><img src="{path}" loading="lazy" alt="Screenshot of {escape(shot["page"], quote=True)}"></a><figcaption>{escape(shot["page"])} at {shot["width"]}px, {escape(shot["theme"])}</figcaption></figure>')
+        note = f". {escape(shot['note'])}" if shot.get("note") else ""
+        cards.append(f'<figure><a href="{path}"><img src="{path}" loading="lazy" alt="Screenshot of {escape(shot["page"], quote=True)}"></a><figcaption>{escape(shot["page"])} at {shot["width"]}px, {escape(shot["theme"])}{note}</figcaption></figure>')
     rows = "".join(f'<li class="{"allowed" if item["allowed"] else "error"}"><strong>{escape(item["kind"])}</strong> {escape(item.get("page", ""))}: {escape(item["message"])}</li>' for item in marked)
     html = f'''<!doctype html><html lang="en"><meta charset="utf-8"><title>Sitecheck report</title>
 <style>body{{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#222}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}}figure{{margin:0}}img{{max-width:100%;border:1px solid #ccc}}li{{margin:.5rem 0;overflow-wrap:anywhere}}.error{{color:#a00}}.allowed{{color:#666}}</style>
-<h1>Sitecheck report</h1><p>{report['error_count']} errors</p><h2>Findings</h2><ul>{rows}</ul><h2>Screenshots</h2><div class="grid">{''.join(cards)}</div></html>'''
+<h1>Sitecheck report</h1><p>{escape(summary)}</p><h2>Findings</h2><ul>{rows}</ul><h2>Screenshots</h2><div class="grid">{''.join(cards)}</div></html>'''
     (output / "report.html").write_text(html, encoding="utf-8")
     return report["error_count"]

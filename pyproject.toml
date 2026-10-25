@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sitecheck"
-version = "0.1.0"
+version = "0.1.1"
 description = "Visual and content checks for static sites"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,4 +22,3 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

@@ -5,15 +5,38 @@ from __future__ import annotations
 from .discovery import PageParser, check_links
 
 
-def overflow_findings(boxes: list[dict], viewport: int, tolerance: float = 1) -> list[dict]:
-    """Report visible boxes extending beyond either viewport edge."""
-    findings = []
-    for box in boxes:
+def overflow_findings(layout: dict, viewport: int, tolerance: float = 1) -> list[dict]:
+    """Return one page overflow finding, with visible unclipped culprits."""
+    scroll_width = float(layout["scrollWidth"])
+    client_width = float(layout["clientWidth"])
+    if scroll_width <= client_width:
+        return []
+
+    culprits = []
+    for box in layout["boxes"]:
         left = float(box.get("left", 0))
         right = float(box.get("right", left + float(box.get("width", 0))))
-        if box.get("visible", True) and (left < -tolerance or right > viewport + tolerance):
-            findings.append({"kind": "overflow", "message": f"{box.get('selector', 'element')} spans {left:g} to {right:g} at {viewport}px"})
-    return findings
+        if (box.get("display") == "none" or box.get("visibility") == "hidden"
+                or box.get("position") == "fixed"
+                or float(box.get("width", right - left)) <= 0
+                or float(box.get("height", 0)) <= 0
+                or right <= 0 or left >= viewport):
+            continue
+        if left >= -tolerance and right <= viewport + tolerance:
+            continue
+        if any(ancestor.get("overflowX") in ("auto", "scroll", "hidden", "clip")
+               and float(ancestor["left"]) >= 0
+               and float(ancestor["right"]) <= viewport
+               for ancestor in box.get("ancestors", [])):
+            continue
+        culprits.append(box.get("selector", "element"))
+
+    count = len(culprits)
+    examples = ", ".join(culprits[:5])
+    message = f"Document scrolls sideways by {scroll_width - client_width:g}px; {count} culprit elements"
+    if examples:
+        message += f": {examples}"
+    return [{"kind": "overflow", "count": count, "message": message}]
 
 
 def static_findings(url: str, page: PageParser, cache: dict | None = None) -> list[dict]:
@@ -25,13 +48,23 @@ def static_findings(url: str, page: PageParser, cache: dict | None = None) -> li
     return findings
 
 
-# Return every box so Python can compare it with the requested viewport.
+# Return page width and box data so Python can filter and group findings.
 LAYOUT_JS = """(() => {
-  return [...document.querySelectorAll('*')].map((el, index) => {
+  const root = document.documentElement;
+  const boxes = [...document.querySelectorAll('*')].map((el, index) => {
     const r = el.getBoundingClientRect();
     const style = getComputedStyle(el);
-    const visible = style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+    const ancestors = [];
+    for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+      const parentStyle = getComputedStyle(parent);
+      if (['auto', 'scroll', 'hidden', 'clip'].includes(parentStyle.overflowX)) {
+        const bounds = parent.getBoundingClientRect();
+        ancestors.push({overflowX: parentStyle.overflowX, left: bounds.left, right: bounds.right});
+      }
+    }
     return {selector: el.id ? '#' + el.id : el.tagName.toLowerCase() + ':nth(' + index + ')',
-      left: r.left, right: r.right, width: r.width, visible};
+      left: r.left, right: r.right, width: r.width, height: r.height,
+      display: style.display, visibility: style.visibility, position: style.position, ancestors};
   });
+  return {scrollWidth: root.scrollWidth, clientWidth: root.clientWidth, boxes};
 })()"""

@@ -28,6 +28,10 @@ sitecheck doc-commands examples/demo-site/docs
 
 The demo includes a broken link and a wide panel. Reports go to `sitecheck-out/report.json`, `report.md`, and `report.html`. Screenshots and contact sheets appear there when requested. `smoke`, `doc-commands`, and `all` return a nonzero status when errors are found.
 
+Overflow is reported once per page and viewport when the document is wider than its viewport. The finding includes a culprit count and up to five element selectors. Elements clipped by an ancestor inside the viewport, hidden elements, fixed elements, zero size elements, and offscreen elements are excluded from the culprit list. The report summary shows error counts by kind.
+
+Screenshots are captured in vertical tiles of at most 8000 pixels and stitched into a PNG. Chrome does not scroll the page during capture. Use `--max-height 40000` to set the maximum captured height. Taller pages are truncated and the report records their full height. The same limit can be set with `max_height` in the configuration file.
+
 ## Configuration
 
 `sitecheck init` writes `sitecheck.toml`. Command options override matching settings.
@@ -43,6 +47,7 @@ The demo includes a broken link and a wide panel. Reports go to `sitecheck-out/r
 | `sitemap` | Read `/sitemap.xml` before crawling | `true` |
 | `chrome` | Chrome executable | `PATH` or `SITECHECK_CHROME` |
 | `browser_timeout` | Seconds allowed per Chrome command, overridden by `--timeout` | `40` |
+| `max_height` | Maximum screenshot height in pixels, overridden by `--max-height` | `40000` |
 | `theme_mode` | `media`, `attribute`, or `query` | `media` |
 | `theme_attribute`, `theme_query` | Attribute or query key | `data-theme`, `theme` |
 | `docs` | Markdown files or directories for `all` and `doc-commands` | `docs` |
@@ -62,4 +67,4 @@ allow = [{ kind = "broken_link", page = "*/draft.html" }]
 
 ## Limitations
 
-Screenshots use a tall viewport and clip to page bounds. Sitecheck never scrolls or navigates to anchors in Chrome. Pages taller than 16000 pixels produce a browser error. Pages that depend on scrolling or complex user interaction may need separate tests. Link checks inspect HTML returned by the server, so links created only by JavaScript are outside their scope. Shell examples execute with the current user's permissions in the configured working directory.
+Screenshots use a viewport of at most 8000 pixels and clip to page bounds. Sitecheck never scrolls or navigates to anchors in Chrome. Pages that depend on scrolling or complex user interaction may need separate tests. Link checks inspect HTML returned by the server, so links created only by JavaScript are outside their scope. Shell examples execute with the current user's permissions in the configured working directory.

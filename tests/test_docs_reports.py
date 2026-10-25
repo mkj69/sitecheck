@@ -28,8 +28,13 @@ def test_contact_sheet_and_reports(tmp_path):
     with Image.open(sheet) as image:
         assert image.size == (200, 216)
     output = tmp_path / "report"
-    count = write_reports(output, [{"kind": "broken_link", "page": "/", "message": "missing"}],
+    count = write_reports(output, [{"kind": "broken_link", "page": "/", "message": "missing"},
+                                   {"kind": "overflow", "page": "/", "message": "wide"},
+                                   {"kind": "overflow", "page": "/other", "message": "wide"}],
                           rules=[{"kind": "broken_link", "page": "/"}])
-    assert count == 0
-    assert json.loads((output / "report.json").read_text())["findings"][0]["allowed"]
-    assert "Sitecheck report" in (output / "report.html").read_text()
+    assert count == 2
+    report = json.loads((output / "report.json").read_text())
+    assert report["findings"][0]["allowed"]
+    assert report["error_counts_by_kind"] == {"overflow": 2}
+    assert "2 errors (overflow: 2)" in (output / "report.html").read_text()
+    assert "Errors: 2 (overflow: 2)" in (output / "report.md").read_text()
