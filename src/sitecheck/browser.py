@@ -139,6 +139,26 @@ class Chrome:
             raise BrowserError(f"JavaScript evaluation failed: {result['exceptionDetails'].get('text', '')}")
         return result.get("result", {}).get("value")
 
+    def click_text(self, text: str, selector: str = "button, a, [role=button], [role=tab], [role=radio]") -> bool:
+        return bool(self.evaluate(f"""(() => {{
+            const visible = element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden';
+            const element = [...document.querySelectorAll({json.dumps(selector)})]
+                .find(item => visible(item) && item.innerText.trim() === {json.dumps(text)});
+            if (!element) return false;
+            element.click();
+            return true;
+        }})()"""))
+
+    def fill(self, selector: str, value: str) -> bool:
+        return bool(self.evaluate(f"""(() => {{
+            const element = document.querySelector({json.dumps(selector)});
+            if (!element) return false;
+            element.value = {json.dumps(value)};
+            element.dispatchEvent(new Event('input', {{bubbles: true}}));
+            element.dispatchEvent(new Event('change', {{bubbles: true}}));
+            return true;
+        }})()"""))
+
     def open(self, url: str, width: int, theme: str = "light", theme_mode: str = "media", theme_attribute: str = "data-theme", theme_query: str = "theme"):
         self.events.clear()
         self.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": 900,

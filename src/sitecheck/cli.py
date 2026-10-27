@@ -20,6 +20,7 @@ from .checks import overflow_findings, static_findings
 from .discovery import discover, fetch, parse_page, serve
 from .docs import collect, run
 from .reports import contact_sheet, write_reports
+from .journeys import language_findings, navwalk, parse_rules, parse_walk, run_walk
 
 
 DEFAULT_CONFIG = '''# Sitecheck configuration
@@ -34,6 +35,12 @@ sitemap = true
 chrome = ""
 browser_timeout = 40
 max_height = 40000
+# Selectors are CSS. An empty selector disables that check.
+widget_root = ""
+static_fallback = ""
+nav_selector = "nav a"
+settle = 1.5
+# lang_rules = [{ page = "*/en/*", scripts = ["cjk"], allow = ["例"] }]
 # Choose media, attribute, or query.
 theme_mode = "media"
 theme_attribute = "data-theme"
@@ -79,6 +86,25 @@ def parser() -> argparse.ArgumentParser:
     docs.add_argument("--language", action="append")
     docs.add_argument("--skip-marker")
     docs.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+    for name in ("navwalk", "lang", "walk"):
+        part = sub.add_parser(name)
+        part.add_argument("source", nargs="?", help="URL or directory")
+        part.add_argument("--output", type=Path)
+        part.add_argument("--chrome")
+        part.add_argument("--timeout", type=float)
+        part.add_argument("--width", type=int)
+        if name != "walk":
+            part.add_argument("--limit", type=int)
+            part.add_argument("--include", action="append")
+            part.add_argument("--exclude", action="append")
+            part.add_argument("--no-sitemap", action="store_true")
+            part.add_argument("--settle", type=float)
+        if name == "navwalk":
+            part.add_argument("--nav-selector")
+            part.add_argument("--widget-root")
+            part.add_argument("--static-fallback")
+        if name == "walk":
+            part.add_argument("--script", required=True, type=Path)
     return root
 
 
@@ -140,6 +166,8 @@ def main(argv: list[str] | None = None) -> int:
             errors = write_reports(output, findings, commands=commands)
             print(f"{len(commands)} commands, {errors} errors: {output / 'report.html'}")
             return int(errors > 0)
+        if args.command in ("navwalk", "lang", "walk"):
+            return run_browser_journey(args, config, output)
         source = args.source or config.get("source")
         if not source:
             raise ValueError("Provide a URL or directory, or set source in sitecheck.toml")
@@ -230,6 +258,67 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"sitecheck: {exc}", file=sys.stderr)
         return 2
+
+
+def run_browser_journey(args, config: dict, output: Path) -> int:
+    source = args.source or config.get("source")
+    width = value(args, config, "width", 1440)
+    if not isinstance(width, int) or width < 1:
+        raise ValueError("Width must be a positive integer")
+    timeout = value(args, config, "timeout", config.get("browser_timeout", DEFAULT_BROWSER_TIMEOUT))
+    settle = value(args, config, "settle", 1.5)
+    if args.command != "walk" and (not isinstance(settle, (float, int)) or settle < 0):
+        raise ValueError("settle must be nonnegative seconds")
+    script = parse_walk(args.script) if args.command == "walk" else None
+    rules = parse_rules(config.get("lang_rules", [])) if args.command == "lang" else []
+    if args.command == "lang" and not rules:
+        raise ValueError("Set lang_rules in sitecheck.toml before running lang")
+    if args.command != "walk" and not source:
+        raise ValueError("Provide a URL or directory, or set source in sitecheck.toml")
+    with ExitStack() as stack:
+        if source and urlparse(source).scheme in ("http", "https"):
+            start = source
+        elif source:
+            directory = Path(source)
+            if not directory.is_dir():
+                raise ValueError(f"Site directory does not exist: {source}")
+            start = stack.enter_context(serve(directory))
+        else:
+            start = None
+        pages = (discover(start, include=value(args, config, "include", []),
+                          exclude=value(args, config, "exclude", []),
+                          limit=value(args, config, "limit", 100),
+                          sitemap=not getattr(args, "no_sitemap", False) and config.get("sitemap", True))
+                 if args.command != "walk" else [])
+        findings, shots = [], []
+        if args.command != "walk" and not pages:
+            findings.append({"kind": "no_pages", "page": start, "message": "No pages discovered"})
+        if pages or script:
+            try:
+                with Chrome(value(args, config, "chrome", None) or None, timeout=timeout) as browser:
+                    if args.command == "navwalk":
+                        findings += navwalk(browser, start, pages, width,
+                                            value(args, config, "nav_selector", "nav a"),
+                                            value(args, config, "widget_root", ""),
+                                            value(args, config, "static_fallback", ""), settle)
+                    elif args.command == "lang":
+                        for page in pages:
+                            try:
+                                browser.open(page, width)
+                                browser.pump(settle)
+                                findings += language_findings(browser.evaluate("document.body.innerText"), page, rules)
+                                findings += [{"page": page, **item} for item in browser.event_findings()
+                                             if item["kind"] == "uncaught_exception"]
+                            except BrowserError as exc:
+                                findings.append({"kind": "browser_error", "page": page, "message": str(exc)})
+                    else:
+                        findings, shots = run_walk(browser, script, start, output, width,
+                                                   config.get("max_height", 40000))
+            except BrowserError as exc:
+                findings.append({"kind": "browser_error", "page": start or "walk", "message": str(exc)})
+        errors = write_reports(output, findings, shots, config.get("allow", []))
+        print(f"{len(pages) if script is None else len(script['urls'])} pages, {errors} errors: {output / 'report.html'}")
+        return int(errors > 0)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,15 @@ def allowed(finding: dict, rules: list[dict]) -> bool:
                and fnmatch(finding.get("message", ""), rule.get("message", "*")) for rule in rules)
 
 
+def finding_context(item: dict) -> str:
+    details = []
+    if "route" in item:
+        details.append(item["route"])
+    if "step" in item:
+        details.append(f"step {item['step']}")
+    return f" ({', '.join(details)})" if details else ""
+
+
 def write_reports(output: Path, findings: list[dict], shots: list[dict] | None = None,
                   rules: list[dict] | None = None, commands: list[dict] | None = None) -> int:
     output.mkdir(parents=True, exist_ok=True)
@@ -52,7 +61,7 @@ def write_reports(output: Path, findings: list[dict], shots: list[dict] | None =
               "error_count": len(failures), "error_counts_by_kind": counts}
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     lines = ["# Sitecheck report", "", f"Errors: {len(failures)}{kind_summary}", "", "## Findings", ""]
-    lines += [f"- {'Allowed' if item['allowed'] else 'Error'}: {item.get('page', '')} {item['kind']}: {item['message']}" for item in marked]
+    lines += [f"- {'Allowed' if item['allowed'] else 'Error'}: {item.get('page', '')}{finding_context(item)} {item['kind']}: {item['message']}" for item in marked]
     if shots:
         lines += ["", "## Screenshots", ""]
         lines += [f"- {shot['page']} at {shot['width']}px, {shot['theme']}: {shot['path']}"
@@ -66,7 +75,7 @@ def write_reports(output: Path, findings: list[dict], shots: list[dict] | None =
         path = escape(shot["path"], quote=True)
         note = f". {escape(shot['note'])}" if shot.get("note") else ""
         cards.append(f'<figure><a href="{path}"><img src="{path}" loading="lazy" alt="Screenshot of {escape(shot["page"], quote=True)}"></a><figcaption>{escape(shot["page"])} at {shot["width"]}px, {escape(shot["theme"])}{note}</figcaption></figure>')
-    rows = "".join(f'<li class="{"allowed" if item["allowed"] else "error"}"><strong>{escape(item["kind"])}</strong> {escape(item.get("page", ""))}: {escape(item["message"])}</li>' for item in marked)
+    rows = "".join(f'<li class="{"allowed" if item["allowed"] else "error"}"><strong>{escape(item["kind"])}</strong> {escape(item.get("page", ""))}{escape(finding_context(item))}: {escape(item["message"])}</li>' for item in marked)
     html = f'''<!doctype html><html lang="en"><meta charset="utf-8"><title>Sitecheck report</title>
 <style>body{{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#222}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}}figure{{margin:0}}img{{max-width:100%;border:1px solid #ccc}}li{{margin:.5rem 0;overflow-wrap:anywhere}}.error{{color:#a00}}.allowed{{color:#666}}</style>
 <h1>Sitecheck report</h1><p>{escape(summary)}</p><h2>Findings</h2><ul>{rows}</ul><h2>Screenshots</h2><div class="grid">{''.join(cards)}</div></html>'''

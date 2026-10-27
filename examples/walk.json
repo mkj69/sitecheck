@@ -1,0 +1,14 @@
+{
+  "pages": {
+    "home": "/",
+    "about": "/about.html"
+  },
+  "urls": ["home"],
+  "steps": [
+    {"open": "$target"},
+    {"click_text": "About"},
+    {"wait": {"text": "About", "timeout": 5}},
+    {"assert_text": "About"},
+    {"screenshot": "page.png"}
+  ]
+}

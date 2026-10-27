@@ -24,6 +24,8 @@ sitecheck smoke examples/demo-site
 sitecheck shots examples/demo-site
 sitecheck all examples/demo-site
 sitecheck doc-commands examples/demo-site/docs
+sitecheck navwalk examples/demo-site
+sitecheck walk examples/demo-site --script examples/walk.json
 ```
 
 The demo includes a broken link and a wide panel. Reports go to `sitecheck-out/report.json`, `report.md`, and `report.html`. Screenshots and contact sheets appear there when requested. `smoke`, `doc-commands`, and `all` return a nonzero status when errors are found.
@@ -56,6 +58,10 @@ Screenshots are captured in vertical tiles of at most 8000 pixels and stitched i
 | `doc_cwd`, `doc_timeout` | Command working directory and seconds per block | `.`, `30` |
 | `doc_env` | Environment values passed to each command | empty |
 | `allow` | Finding rules with `kind`, optional `page` and `message` globs | empty |
+| `nav_selector` | CSS selector for home page navigation links | `nav a` |
+| `widget_root`, `static_fallback` | CSS selectors for expected widget roots and visible fallback content | empty |
+| `settle` | Seconds to wait after a page load or navigation | `1.5` |
+| `lang_rules` | Page globs, forbidden scripts, and literal text exemptions | empty |
 
 Each documentation block runs in a fresh Bash process with `-e` and `pipefail`. Use `--env NAME=VALUE` for a command environment variable. Failed blocks report their file, line, exit status, and output tail. The skip marker may appear anywhere inside a block.
 
@@ -65,6 +71,31 @@ An allow rule can suppress a known finding:
 allow = [{ kind = "broken_link", page = "*/draft.html" }]
 ```
 
+## Navigation walk
+
+A direct load can work even when an in-site click leaves a widget uninitialised. `sitecheck navwalk SITE` discovers pages, loads each directly, then returns to the home page and follows a matching navigation link to every other page. It reports missing navigation links, wrong destinations, missing widget roots, visible static fallbacks, console errors, and uncaught JavaScript exceptions. Findings include `route` as `direct` or `nav`. JavaScript-rendered navigation links are supported, but pages not linked from the selected home navigation are reported as missing. Use `--include` or `--exclude` to scope discovery, and `--nav-selector`, `--widget-root`, `--static-fallback`, `--settle`, or `--width` to adjust checks. Selectors are optional except for navigation. When a widget root is configured it is expected on every selected page.
+
+```toml
+nav_selector = "header nav a[href]"
+widget_root = ".interactive-widget"
+static_fallback = ".widget-static, noscript"
+settle = 2.0
+```
+
+## Rendered language
+
+Source checks miss labels produced by JavaScript. `sitecheck lang SITE` reads visible `document.body.innerText` after rendering and reports forbidden writing systems by page. Define rules in `sitecheck.toml` before running the command. Match only the relevant language pages with a URL glob. Allowed phrases are removed literally from each rendered line before matching. Available scripts are `cjk`, `han`, `kana`, `hangul`, `cyrillic`, `arabic`, and `greek`. CJK includes Han, kana, and Hangul. Use `--settle` for delayed content and `--include` or `--exclude` to scope pages.
+
+```toml
+lang_rules = [{ page = "*/en/*", scripts = ["cjk"], allow = ["漢字 example"] }]
+```
+
+## Interaction walk
+
+An idle page cannot prove that buttons, answer panels, and other interactions work. `sitecheck walk SITE --script examples/walk.json` runs a declarative JSON journey for each URL or page id listed in `urls`. The optional `pages` map defines ids. Relative URLs resolve against SITE, which may be a served directory or a URL. Absolute URLs work without SITE. Each target opens automatically before the steps; `{"open": "$target"}` reopens it. Supported steps are `open` with a URL or id, `click_text` with exact visible control text, `fill` with `selector` and `value`, `wait` with seconds or `{"text": "Ready", "timeout": 10}`, `assert_text` with a visible text fragment, and `screenshot` with a filename. Text checks use rendered `innerText`. A failed step stops that target and reports its step number while other targets continue. Screenshots go into the normal report output. The example at `examples/walk.json` works against the demo site.
+
+All three commands write JSON, Markdown, and HTML reports and exit nonzero on unsuppressed findings. Browser checks require Chrome. Run offline unit tests with `pytest`.
+
 ## Limitations
 
-Screenshots use a viewport of at most 8000 pixels and clip to page bounds. Sitecheck never scrolls or navigates to anchors in Chrome. Pages that depend on scrolling or complex user interaction may need separate tests. Link checks inspect HTML returned by the server, so links created only by JavaScript are outside their scope. Shell examples execute with the current user's permissions in the configured working directory.
+Screenshots use a viewport of at most 8000 pixels and clip to page bounds. Browser walks do not scroll or follow anchors automatically. Link checks inspect HTML returned by the server, so links created only by JavaScript are outside their scope. Shell examples execute with the current user's permissions in the configured working directory.
