@@ -2,8 +2,6 @@
 
 Sitecheck finds pages, checks common static site problems, captures screenshots, and runs shell examples from Markdown. It is useful before publishing a site or reviewing a redesign.
 
-Originally built for the Opulse release.
-
 ## Install
 
 Python 3.10 or newer and Chrome are required for browser checks. Pillow is installed with the package. Chrome is found on `PATH`, or set `--chrome` or `SITECHECK_CHROME`.
@@ -70,6 +68,51 @@ An allow rule can suppress a known finding:
 ```toml
 allow = [{ kind = "broken_link", page = "*/draft.html" }]
 ```
+
+## Screenshot service for sandboxed agents
+
+Run `sitecheck serve-shots` **outside** the agent's sandbox, where Chrome and loopback sockets are available. The service watches a shared request directory, builds each requested worktree, serves its generated files on an OS-assigned free loopback port, captures full-page PNGs, and writes a JSON report. Leave it running while the agent edits the site. For example:
+
+```sh
+sitecheck serve-shots --requests /shared/shot-requests --output /shared/shot-output \
+  --build-command 'npm run build' --site-dir dist
+```
+
+`--requests` defaults to `shot-requests`, `--output` to `shot-output`, and `--site-dir` to `site` relative to each worktree. The build command runs in the requested worktree using the service user's environment; it is required for requests with `"build": true`. `"build": false` uses an already-built directory. The service user must trust worktrees and requests: the build command executes there with that user's permissions. `--build-timeout` defaults to 300 seconds, `--timeout` to **150 seconds per Chrome call** (long captures can be slow on a loaded machine), `--settle` to 1.5 seconds after navigation and each click, and `--poll` to 2 seconds. `--chrome` or `SITECHECK_CHROME` selects Chrome.
+
+Theme switching defaults to `--theme-mode media`, which emulates `prefers-color-scheme`. For sites controlled by an HTML attribute, use `--theme-mode attribute --theme-attribute data-theme`. For a site toggle, use `--theme-mode click --theme-selector 'button.theme-toggle' --theme-attribute data-theme`: the service loads with light media, checks the attribute on the root or body, and clicks the selector until it matches the requested theme (at most three times). The expected attribute values default to `light` and `dark`; override them with `--theme-light-value` and `--theme-dark-value` (for example, `default` and `slate`).
+
+### Request JSON
+
+Write one UTF-8 JSON file named `<unique-id>.json` in the request directory. IDs must start with an ASCII letter or digit, contain only ASCII letters, digits, `_` or `-`, and be at most 80 characters long. The object has these fields (unknown fields are rejected):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `worktree` | string, required | Existing absolute path to the site worktree, visible to the service |
+| `build` | boolean, optional | Run the configured build command before serving; default `true` |
+| `shots` | nonempty array, required | Ordered page captures, one PNG per entry |
+
+Each `shots` entry accepts `path` (local URL path, optionally with a query; default `/`), `width` (positive integer pixels; default `1440`), `theme` (`light` or `dark`; default `light`), `click` (array of exact visible button/tab labels, clicked in order), and `max_height` (positive integer pixels; default `6000`). Unknown fields, external URLs, and fragments are rejected. A missing button or invalid request produces `ERROR` rather than a misleading screenshot.
+
+```json
+{
+  "worktree": "/shared/worktrees/my-site",
+  "build": true,
+  "shots": [
+    {"path": "/", "width": 390, "theme": "light"},
+    {"path": "/guide/?view=grid", "width": 1440, "theme": "dark",
+     "click": ["Examples", "Next"], "max_height": 12000}
+  ]
+}
+```
+
+### Agent-side protocol
+
+1. Generate a fresh unique ID for each attempt (for example, a UUID hex string). Write JSON to a temporary file **in the request directory**, then atomically rename it to `<id>.json` so the watcher never reads a partial request.
+2. Poll `<output>/<id>/DONE` or `<output>/<id>/ERROR`. The service processes requests sequentially and ignores IDs that already have either marker; don't reuse an ID. If `ERROR` appears, read it for the traceback (and `build.log` for failed builds).
+3. After `DONE`, read `<output>/<id>/report.json` (an array in shot order) and `<output>/<id>/0.png`, `1.png`, etc. Each entry contains the request `shot`, relative `png` filename, `scrollWidth`, `viewport`, `count` of elements whose right edge extends beyond the viewport outside a horizontal scroll box, up to 25 `overflowing` examples, `exceptions` from Chrome, and `capture` height/truncation metadata. A page can have a nonzero overflow count or JS exceptions and still finish with `DONE`; inspect the report.
+
+Keep in-page JavaScript embedded in Python as **raw strings**: a `"\n"` escape inside a normal Python string may become a newline inside a JavaScript string literal, causing every evaluation to fail with a bare `Uncaught`. Bind the HTTP server to port `0` so the OS chooses an actually free port; reusing an occupied port may silently serve an old site and cause misleading 404s. When scanning rendered text for error words such as `undefined`, allow-list legitimate content that uses those words; prefer structured JS exceptions for actual runtime errors.
 
 ## Navigation walk
 

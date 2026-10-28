@@ -7,4 +7,6 @@ build/
 dist/
 sitecheck-out/
 source_snapshot/
-
+source_snapshot3/
+shot-requests/
+shot-output/

@@ -21,6 +21,7 @@ from .discovery import discover, fetch, parse_page, serve
 from .docs import collect, run
 from .reports import contact_sheet, write_reports
 from .journeys import language_findings, navwalk, parse_rules, parse_walk, run_walk
+from .shot_service import serve_shots
 
 
 DEFAULT_CONFIG = '''# Sitecheck configuration
@@ -62,6 +63,21 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument("--config", type=Path, default=Path("sitecheck.toml"))
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("init", help="write a starter sitecheck.toml")
+    service = sub.add_parser("serve-shots", help="watch agent requests and capture built sites")
+    service.add_argument("--requests", type=Path, default=Path("shot-requests"))
+    service.add_argument("--output", type=Path, default=Path("shot-output"))
+    service.add_argument("--build-command", help="shell command run in the requested worktree")
+    service.add_argument("--site-dir", default="site", help="built site directory relative to worktree")
+    service.add_argument("--build-timeout", type=float, default=300)
+    service.add_argument("--chrome")
+    service.add_argument("--timeout", type=float, default=150, help="seconds per Chrome call")
+    service.add_argument("--theme-mode", choices=("media", "attribute", "click"), default="media")
+    service.add_argument("--theme-attribute", default="data-theme")
+    service.add_argument("--theme-selector", default="")
+    service.add_argument("--theme-light-value", default="light")
+    service.add_argument("--theme-dark-value", default="dark")
+    service.add_argument("--settle", type=float, default=1.5)
+    service.add_argument("--poll", type=float, default=2)
     for name in ("pages", "shots", "smoke", "all"):
         part = sub.add_parser(name)
         part.add_argument("source", nargs="?", help="URL or directory")
@@ -160,6 +176,17 @@ def main(argv: list[str] | None = None) -> int:
             print(args.config)
             return 0
         config = read_config(args.config)
+        if args.command == "serve-shots":
+            try:
+                serve_shots(args.requests, args.output, poll=args.poll, build_command=args.build_command,
+                            site_dir=args.site_dir, build_timeout=args.build_timeout, chrome=args.chrome,
+                            timeout=args.timeout, theme_mode=args.theme_mode, theme_attribute=args.theme_attribute,
+                            theme_selector=args.theme_selector, theme_values={"light": args.theme_light_value,
+                                                                               "dark": args.theme_dark_value},
+                            settle=args.settle)
+            except KeyboardInterrupt:
+                return 0
+            return 0
         output = Path(value(args, config, "output", "sitecheck-out"))
         if args.command == "doc-commands":
             commands, findings = run_docs(args, config, output)
