@@ -24,6 +24,7 @@ sitecheck all examples/demo-site
 sitecheck doc-commands examples/demo-site/docs
 sitecheck navwalk examples/demo-site
 sitecheck walk examples/demo-site --script examples/walk.json
+sitecheck strip https://example.org/viewer --region '.panel' --button-text 'Next step' --output strip.png
 ```
 
 The demo includes a broken link and a wide panel. Reports go to `sitecheck-out/report.json`, `report.md`, and `report.html`. Screenshots and contact sheets appear there when requested. `smoke`, `doc-commands`, and `all` return a nonzero status when errors are found.
@@ -138,6 +139,25 @@ lang_rules = [{ page = "*/en/*", scripts = ["cjk"], allow = ["漢字 example"] }
 An idle page cannot prove that buttons, answer panels, and other interactions work. `sitecheck walk SITE --script examples/walk.json` runs a declarative JSON journey for each URL or page id listed in `urls`. The optional `pages` map defines ids. Relative URLs resolve against SITE, which may be a served directory or a URL. Absolute URLs work without SITE. Each target opens automatically before the steps; `{"open": "$target"}` reopens it. Supported steps are `open` with a URL or id, `click_text` with exact visible control text, `fill` with `selector` and `value`, `wait` with seconds or `{"text": "Ready", "timeout": 10}`, `assert_text` with a visible text fragment, and `screenshot` with a filename. Text checks use rendered `innerText`. A failed step stops that target and reports its step number while other targets continue. Screenshots go into the normal report output. The example at `examples/walk.json` works against the demo site.
 
 All three commands write JSON, Markdown, and HTML reports and exit nonzero on unsuppressed findings. Browser checks require Chrome. Run offline unit tests with `pytest`.
+
+## Animation strips
+
+Use `sitecheck strip` to review UI animations and step-by-step viewers from still frames. It opens one page, enlarges the viewport and centers a CSS-selected region away from sticky headers, then clicks a control and captures the **same page-coordinate clip** at each delay. Columns show successive moments after a click; each `--repeat` is another consecutive click in a new row (the page is not reloaded). Output is a single PNG, not a report. For example:
+
+```sh
+sitecheck strip https://example.org/viewer --region '.viewer-panel' \
+  --aria-label 'Next step' --delays 0.05,0.25,0.45,0.7,1.1 \
+  --repeat 2 --width 1440 --output motion.png --timeout 150
+```
+
+Choose exactly one of `--click-selector` (CSS), `--button-text` (exact visible button text), or `--aria-label` (exact aria-label attribute). For a local directory, pass `--page /path/` to select the page; a URL opens directly. `--theme dark` uses `prefers-color-scheme` media emulation by default. If the site defaults to light regardless of media settings, use `--theme-mode click --theme-selector '.palette-toggle' --theme-attribute data-theme --theme-value dark` to click until the HTML or body attribute matches the requested value (at most three clicks). Use `--settle` to wait before choosing the clip. The default delays are `0.05,0.25,0.45,0.7,1.1` seconds; set `--repeat` for sequential transitions. In Python, use `from sitecheck.strip import capture_strip` with an entered `Chrome` browser and the same keyword arguments; it returns the PNG dimensions.
+
+Capture and scheduling introduce timing jitter under load. Use generous `--timeout` values and treat the stated delays as approximate. The clip stays fixed even when the target or page moves, and a CSS region must fit within the viewport; scroll or sticky overlays can still affect what appears in the image.
+
+### Lessons
+
+- Sticky headers can hide clip regions; make the viewport taller and center the target before capturing.
+- A site whose default theme is light may ignore `prefers-color-scheme`; click its palette toggle and verify the resulting attribute instead.
 
 ## Limitations
 

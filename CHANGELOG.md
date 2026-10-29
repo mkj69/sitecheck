@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+Add `sitecheck strip` and `capture_strip` for fixed-region animation contact sheets with configurable click actions, delays, repeats, and palette switching. Add offline fake-browser tests and guidance for reviewing motion, sticky headers, and theme toggles.
+
 ## 0.3.0
 
 Add `serve-shots`, a directory-queued screenshot service for sandboxed coding agents. Build requested worktrees, serve on an OS-assigned loopback port, capture themed pages and interaction states, and report overflow and JavaScript exceptions. Document the request protocol and add offline service tests.

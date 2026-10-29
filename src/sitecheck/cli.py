@@ -22,6 +22,7 @@ from .docs import collect, run
 from .reports import contact_sheet, write_reports
 from .journeys import language_findings, navwalk, parse_rules, parse_walk, run_walk
 from .shot_service import serve_shots
+from .strip import capture_strip
 
 
 DEFAULT_CONFIG = '''# Sitecheck configuration
@@ -78,6 +79,26 @@ def parser() -> argparse.ArgumentParser:
     service.add_argument("--theme-dark-value", default="dark")
     service.add_argument("--settle", type=float, default=1.5)
     service.add_argument("--poll", type=float, default=2)
+    strip = sub.add_parser("strip", help="capture successive animation frames in a PNG grid")
+    strip.add_argument("source", help="page URL or local site directory")
+    strip.add_argument("--page", default="/", help="page path within a local site directory")
+    strip.add_argument("--region", required=True, help="CSS selector of the fixed capture region")
+    action = strip.add_mutually_exclusive_group(required=True)
+    action.add_argument("--click-selector", help="CSS selector of the control to click")
+    action.add_argument("--button-text", help="exact visible button text")
+    action.add_argument("--aria-label", help="exact aria-label of the control")
+    strip.add_argument("--delays", default="0.05,0.25,0.45,0.7,1.1", help="comma-separated seconds after each click")
+    strip.add_argument("--repeat", type=int, default=1, help="consecutive clicks (one row each)")
+    strip.add_argument("--width", type=int, default=1440)
+    strip.add_argument("--theme", choices=("light", "dark"), default="light")
+    strip.add_argument("--theme-mode", choices=("media", "click"), default="media")
+    strip.add_argument("--theme-selector", help="CSS selector of palette toggle for click theme mode")
+    strip.add_argument("--theme-attribute", default="data-theme")
+    strip.add_argument("--theme-value", help="expected attribute value (defaults to theme name)")
+    strip.add_argument("--settle", type=float, default=1.5, help="seconds to settle before capture")
+    strip.add_argument("--chrome")
+    strip.add_argument("--timeout", type=float, default=150, help="seconds per Chrome call")
+    strip.add_argument("--output", required=True, type=Path, help="output PNG path")
     for name in ("pages", "shots", "smoke", "all"):
         part = sub.add_parser(name)
         part.add_argument("source", nargs="?", help="URL or directory")
@@ -187,6 +208,32 @@ def main(argv: list[str] | None = None) -> int:
             except KeyboardInterrupt:
                 return 0
             return 0
+        if args.command == "strip":
+            try:
+                delays = [float(part) for part in args.delays.split(",")]
+                with ExitStack() as stack:
+                    if urlparse(args.source).scheme in ("http", "https"):
+                        if args.page != "/":
+                            raise ValueError("--page is only available for local site directories")
+                        page = args.source
+                    else:
+                        directory = Path(args.source)
+                        if not directory.is_dir():
+                            raise ValueError(f"Site directory does not exist: {args.source}")
+                        if not args.page.startswith("/") or args.page.startswith("//"):
+                            raise ValueError("--page must start with a single /")
+                        page = stack.enter_context(serve(directory)).rstrip("/") + args.page
+                    with Chrome(args.chrome, timeout=args.timeout) as browser:
+                        size = capture_strip(browser, page, args.output, region=args.region,
+                                             click_selector=args.click_selector, button_text=args.button_text,
+                                             aria_label=args.aria_label, delays=delays, repeat=args.repeat,
+                                             width=args.width, theme=args.theme, theme_mode=args.theme_mode,
+                                             theme_selector=args.theme_selector, theme_attribute=args.theme_attribute,
+                                             theme_value=args.theme_value, settle=args.settle)
+                print(f"{args.output}: {size[0]}x{size[1]}")
+                return 0
+            except BrowserError as exc:
+                raise ValueError(str(exc)) from exc
         output = Path(value(args, config, "output", "sitecheck-out"))
         if args.command == "doc-commands":
             commands, findings = run_docs(args, config, output)
